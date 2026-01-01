@@ -1,0 +1,76 @@
+services:
+
+  site:
+    build: .
+    command: ["uv", "run", "-m", "src.app.cmd.site"]
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+    ports:
+      - "5001:5001"
+
+  mcp-server:
+    build: .
+    command: ["uv", "run", "-m", "src.app.cmd.mcp"]
+    healthcheck:
+      test: [ "CMD-SHELL", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 1s
+      retries: 15
+    ports:
+      - "8080:8080"
+
+  temporal-worker:
+    build: .
+    command: [ "uv", "run", "-m", "src.app.cmd.worker" ]
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+
+  temporal-server:
+    image: temporalio/auto-setup:1.29.1
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    healthcheck:
+      test: "temporal operator namespace describe -n daq"
+      interval: 1s
+      retries: 15
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=user
+      - POSTGRES_PWD=password
+      - POSTGRES_SEEDS=temporal-db
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - DEFAULT_NAMESPACE=daq
+      - LOG_LEVEL=error
+    ports:
+      - "7233:7233"
+
+  temporal-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    healthcheck:
+      test: "pg_isready -U user -d postgres"
+      interval: 1s
+      retries: 15
+    ports:
+      - "5432:5432"
+    volumes:
+      - /var/lib/postgresql/data
+
+  temporal-ui:
+    image: temporalio/ui:2.44.0
+    depends_on:
+      temporal-server:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-server:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - TEMPORAL_HIDE_LOGS=true
+    ports:
+      - "8233:8080"
